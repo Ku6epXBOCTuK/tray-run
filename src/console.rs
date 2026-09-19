@@ -24,6 +24,7 @@ const CREATE_NEW_CONSOLE: PROCESS_CREATION_FLAGS = 0x0000_0010;
 const CREATE_SUSPENDED: PROCESS_CREATION_FLAGS = 0x0000_0004;
 
 pub struct ConsoleRunner {
+    #[allow(dead_code)]
     pub name: String,
     pub visible: bool,
     hwnd: HWND,

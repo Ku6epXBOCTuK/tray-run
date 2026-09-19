@@ -1,5 +1,5 @@
 use crossbeam_channel::{Receiver, Sender};
-use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
+use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -7,9 +7,9 @@ use windows_sys::Win32::UI::Shell::{
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetCursorPos,
     GetMessageW, LoadIconW, ModifyMenuW, PostMessageW, PostQuitMessage, RegisterClassW,
-    SetForegroundWindow, TrackPopupMenu, TranslateMessage, IDI_APPLICATION, MF_BYCOMMAND,
-    MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_COMMAND, WM_DESTROY,
-    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW,
+    SetForegroundWindow, TrackPopupMenu, TranslateMessage, MF_BYCOMMAND, MF_SEPARATOR, MF_STRING,
+    TPM_BOTTOMALIGN, TPM_LEFTALIGN, WM_APP, WM_COMMAND, WM_DESTROY, WM_LBUTTONUP, WM_NULL,
+    WM_RBUTTONUP, WNDCLASSW,
 };
 
 pub enum Action {
@@ -158,7 +158,8 @@ unsafe fn run_tray_thread(name_w: Vec<u16>, tx: Sender<Action>) {
     nid.uID = 1;
     nid.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
     nid.uCallbackMessage = WM_TRAYICON;
-    nid.hIcon = unsafe { LoadIconW(0 as HINSTANCE, IDI_APPLICATION) };
+    let icon_id = 1 as *const u16;
+    nid.hIcon = unsafe { LoadIconW(hinstance, icon_id) };
     let tip_len = name_w.len().min(nid.szTip.len() - 1);
     nid.szTip[..tip_len].copy_from_slice(&name_w[..tip_len]);
     let ok = Shell_NotifyIconW(NIM_ADD, &nid);

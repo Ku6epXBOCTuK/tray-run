@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <!-- green rounded frame -->
+  <rect x="12" y="12" width="232" height="232" rx="40" fill="none" stroke="#2ecc71" stroke-width="24"/>
+  <!-- dark console background inside -->
+  <rect x="36" y="36" width="184" height="184" rx="20" fill="#1e1e1e"/>
+  <!-- >_ prompt -->
+  <g fill="#2ecc71">
+    <!-- > chevron -->
+    <path d="M 62 84 L 108 128 L 62 172 L 78 172 L 124 128 L 78 84 Z" transform="translate(-4,0)"/>
+    <!-- underscore -->
+    <rect x="132" y="160" width="64" height="20" rx="4"/>
+  </g>
+</svg>

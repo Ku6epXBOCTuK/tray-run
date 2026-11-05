@@ -1,5 +1,6 @@
 #![windows_subsystem = "windows"]
 
+mod cli;
 mod config;
 mod console;
 mod startup;
@@ -242,9 +243,9 @@ impl Supervisor {
             Ok(cfg) => cfg,
             Err(err) => {
                 tray::dlog(&format!("reload failed: {err}"));
-                message_box(
+                cli::message_box(
                     &format!("{}, cannot reload:\n{err}", self.path.display()),
-                    MB_ICONWARNING,
+                    cli::MB_ICONWARNING,
                 );
                 return;
             }
@@ -297,7 +298,7 @@ impl Supervisor {
             }
             Err(err) => {
                 tray::dlog(&format!("autostart failed: {err}"));
-                message_box(&format!("Autostart failed:\n{err}"), MB_ICONWARNING);
+                cli::message_box(&format!("Autostart failed:\n{err}"), cli::MB_ICONWARNING);
             }
         }
     }
@@ -328,6 +329,13 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("--install-startup") => return install_startup(),
         Some("--uninstall-startup") => return uninstall_startup(),
+        Some("--help" | "-h" | "-?" | "/?") => return cli::emit(cli::TEXT, cli::MB_ICONINFO),
+        Some("--version" | "-V") => {
+            return cli::emit(
+                &format!("tray-run {}", env!("CARGO_PKG_VERSION")),
+                cli::MB_ICONINFO,
+            )
+        }
         _ => {}
     }
     let (path, cfg, config_mode) = match parse_mode(&args) {
@@ -362,7 +370,7 @@ fn main() {
             },
             false,
         ),
-        Err(message) => fatal(&message),
+        Err(message) => usage_error(&message),
     };
 
     let mut sup = Supervisor::new(path, cfg, config_mode);
@@ -423,9 +431,18 @@ fn parse_mode(args: &[String]) -> Result<Mode, String> {
         Some(_) => {
             let mut index = 0;
             let mut name = None;
-            if args.first().map(String::as_str) == Some("--name") {
-                name = args.get(1).cloned();
-                index = 2;
+            match args.first().map(String::as_str) {
+                Some("--name") => match args.get(1) {
+                    Some(value) => {
+                        name = Some(value.clone());
+                        index = 2;
+                    }
+                    None => return Err(format!("--name needs a name\n\n{}", usage())),
+                },
+                Some(flag) if flag.starts_with('-') && flag != "--" => {
+                    return Err(format!("unknown option: {flag}\n\n{}", usage()));
+                }
+                _ => {}
             }
             let rest = &args[index..];
             let rest = if rest.first().map(String::as_str) == Some("--") {
@@ -477,12 +494,12 @@ fn install_startup() {
         .map_err(|e| format!("cannot locate tray-run.exe: {e}"))
         .and_then(|exe| startup::install(&exe, &path));
     match result {
-        Ok(()) => message_box(
+        Ok(()) => cli::message_box(
             &format!(
                 "Autostart installed for tray-run.\nConfig: {}",
                 path.display()
             ),
-            MB_ICONINFO,
+            cli::MB_ICONINFO,
         ),
         Err(err) => fatal(&err),
     }
@@ -490,33 +507,71 @@ fn install_startup() {
 
 fn uninstall_startup() {
     match startup::uninstall() {
-        Ok(()) => message_box("Autostart removed.", MB_ICONINFO),
+        Ok(()) => cli::message_box("Autostart removed.", cli::MB_ICONINFO),
         Err(err) => fatal(&err),
     }
 }
 
-const MB_ICONINFO: u32 = 0x40;
-const MB_ICONWARNING: u32 = 0x30;
-const MB_ICONERROR: u32 = 0x10;
-
 fn usage() -> String {
-    "usage:\n  tray-run [--config PATH]\n  tray-run --install-startup | --uninstall-startup\n  tray-run [--name NAME] [--] <command> [args...]".to_string()
-}
-
-fn message_box(text: &str, icon: u32) {
-    let text: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
-    let title: Vec<u16> = "tray-run\0".encode_utf16().collect();
-    unsafe {
-        windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-            std::ptr::null_mut(),
-            text.as_ptr(),
-            title.as_ptr(),
-            icon,
-        );
-    }
+    "usage:\n  tray-run [--config PATH]\n  tray-run --install-startup | --uninstall-startup\n  tray-run [--name NAME] [--] <command> [args...]\n  tray-run --help | --version\n\nPrefix a command that starts with - with --.\nRun tray-run --help for the full manual.".to_string()
 }
 
 fn fatal(message: &str) -> ! {
-    message_box(message, MB_ICONERROR);
+    cli::emit(&format!("tray-run: {message}"), cli::MB_ICONERROR);
     std::process::exit(1);
+}
+
+fn usage_error(message: &str) -> ! {
+    cli::emit(&format!("tray-run: {message}"), cli::MB_ICONERROR);
+    std::process::exit(2);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| item.to_string()).collect()
+    }
+
+    fn parse_err(items: &[&str]) -> String {
+        match parse_mode(&args(items)) {
+            Err(err) => err,
+            Ok(_) => panic!("expected an error for {items:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_option() {
+        let err = parse_err(&["--bogus"]);
+        assert!(err.contains("unknown option: --bogus"), "{err}");
+        assert!(err.contains("usage:"), "{err}");
+    }
+
+    #[test]
+    fn double_dash_escapes_a_dashed_command() {
+        match parse_mode(&args(&["--", "--bogus", "arg"])) {
+            Ok(Mode::AdHoc { command, .. }) => assert_eq!(command, "--bogus arg"),
+            Ok(_) => panic!("expected ad-hoc mode"),
+            Err(err) => panic!("unexpected error: {err}"),
+        }
+    }
+
+    #[test]
+    fn command_keeps_its_dashed_arguments() {
+        match parse_mode(&args(&["ping", "-t", "127.0.0.1"])) {
+            Ok(Mode::AdHoc { name, command }) => {
+                assert_eq!(name, "ping");
+                assert_eq!(command, "ping -t 127.0.0.1");
+            }
+            Ok(_) => panic!("expected ad-hoc mode"),
+            Err(err) => panic!("unexpected error: {err}"),
+        }
+    }
+
+    #[test]
+    fn name_needs_a_value() {
+        let err = parse_err(&["--name"]);
+        assert!(err.contains("--name needs a name"), "{err}");
+    }
 }

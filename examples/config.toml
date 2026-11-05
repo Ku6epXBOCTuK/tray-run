@@ -1,0 +1,19 @@
+[defaults]
+restart = "on-crash"
+start_hidden = true
+restart_gap_ms = 2000
+restart_backoff_max_ms = 60000
+restart_max = 5
+restart_reset_ms = 60000
+
+[app.dev-server]
+command = "npm run dev"
+dir = "C:/projects/web"
+
+[app.build]
+command = "cargo watch -x build"
+dir = "C:/projects/app"
+restart = "always"
+
+[app.ping]
+command = "ping -t 127.0.0.1"

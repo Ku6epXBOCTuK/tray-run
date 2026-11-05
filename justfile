@@ -6,4 +6,4 @@ build:
 
 install:
     cargo build --release
-    cp target/release/tray-run.exe ~/bin/
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1

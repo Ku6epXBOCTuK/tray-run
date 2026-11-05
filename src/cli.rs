@@ -12,15 +12,12 @@ Run console commands hidden and control them from one tray icon.
 USAGE
   tray-run.exe                            start every app from the config file
   tray-run.exe --config PATH              start every app from PATH
-  tray-run.exe [--name NAME] [--] CMD [ARG..]
-                                          run one command, no config, no restarts
   tray-run.exe --install-startup          add the autostart registry entry
   tray-run.exe --uninstall-startup        remove the autostart registry entry
   tray-run.exe --help                     print this help (also -h, -?, /?)
   tray-run.exe --version                  print the version
 
-  Prefix a command that starts with - with --: tray-run.exe -- --weird-tool.
-  An unknown -option prints this usage and exits with code 2.
+  An unknown option prints this usage and exits with code 2.
 
   tray-run.exe is a GUI process and has no console of its own. Help and errors
   are written to the console that started it, or shown in a message box when
@@ -49,7 +46,7 @@ CONFIG FILE
 
     [app.dev-server]
     command = "npm run dev"         # required
-    dir = "C:/projects/web"         # working directory, default: directory of tray-run.exe
+    dir = "C:/projects/web"         # working directory, default: the cwd tray-run was started from
     restart = "always"              # overrides [defaults]
     start_hidden = false
 
@@ -64,7 +61,7 @@ TRAY MENU
   app   Show console / Hide console   toggle the hidden console window
   app   Restart                       kill and start again
   app   Stop                          kill and keep it stopped
-  app   Start                         only for a stopped or given-up app
+  app   Start                         the app is not running
   name -- stopped                     the app is not running
   name -- gave up after N crashes     restarts exhausted, Start is manual
   name (N restarts, next in Ns)       waiting for the next restart
@@ -78,10 +75,10 @@ TRAY MENU
   marked stopped and does not come back by itself.
 
 RESTARTS
-  Config mode only, and only as far as the restart policy allows. An app that
-  stays up for restart_reset_ms clears its crash counter. The delay doubles
-  from restart_gap_ms up to restart_backoff_max_ms. After restart_max crashes
-  the app is given up until Start is used from the menu.
+  Only as far as the restart policy allows. An app that stays up for
+  restart_reset_ms clears its crash counter. The delay doubles from
+  restart_gap_ms up to restart_backoff_max_ms. After restart_max crashes the
+  app is given up until Start is used from the menu.
 
 AUTOSTART
   --install-startup writes one value named tray-run into
@@ -95,13 +92,13 @@ LOGGING
     tray-run.exe
 
 EXIT AND SINGLE INSTANCE
-  Config mode allows one tray-run.exe at a time: a second instance shows a
-  message and exits. Quit stops every app and exits. Ad-hoc mode exits when its
-  command exits and never restarts it.
+  Only one tray-run.exe runs at a time: a second instance reports an error and
+  exits. Reload config from the tray menu to pick up edits. Quit stops every app
+  and exits.
 
 LIMITATIONS
   Windows only. A command that exits before its window is found is reported by
-  exit code and never shows a window. Autostart and restarts need config mode.
+  exit code and never shows a window.
 "#;
 
 pub fn emit(text: &str, icon: u32) {

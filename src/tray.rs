@@ -63,7 +63,6 @@ struct Shared {
     tx: Sender<Action>,
     views: Vec<AppView>,
     autostart: bool,
-    show_config: bool,
     nid: NOTIFYICONDATAW,
 }
 
@@ -93,8 +92,8 @@ impl Tray {
         self.rx.try_recv().ok()
     }
 
-    pub fn sync(&self, views: Vec<AppView>, autostart: bool, show_config: bool) {
-        let key = format!("{autostart}|{show_config}|{views:?}");
+    pub fn sync(&self, views: Vec<AppView>, autostart: bool) {
+        let key = format!("{autostart}|{views:?}");
         {
             let mut last = self.last_key.borrow_mut();
             if *last == key {
@@ -109,7 +108,6 @@ impl Tray {
                 Some(shared) => {
                     shared.views = views;
                     shared.autostart = autostart;
-                    shared.show_config = show_config;
                     shared.nid.hWnd
                 }
                 None => return,
@@ -175,7 +173,6 @@ unsafe fn run_tray_thread(tx: Sender<Action>) {
         tx,
         views: Vec::new(),
         autostart: false,
-        show_config: false,
         nid,
     });
 
@@ -206,10 +203,10 @@ fn tooltip_text(views: &[AppView]) -> String {
 }
 
 unsafe fn popup_menu(hwnd: HWND) {
-    let (views, autostart, show_config) = {
+    let (views, autostart) = {
         let guard = SHARED.lock().unwrap();
         match guard.as_ref() {
-            Some(shared) => (shared.views.clone(), shared.autostart, shared.show_config),
+            Some(shared) => (shared.views.clone(), shared.autostart),
             None => return,
         }
     };
@@ -239,19 +236,17 @@ unsafe fn popup_menu(hwnd: HWND) {
     }
 
     AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-    if show_config {
-        append(menu, ID_RELOAD, "Reload config");
-        append(
-            menu,
-            ID_AUTOSTART,
-            if autostart {
-                "Remove autostart"
-            } else {
-                "Install autostart"
-            },
-        );
-        AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
-    }
+    append(menu, ID_RELOAD, "Reload config");
+    append(
+        menu,
+        ID_AUTOSTART,
+        if autostart {
+            "Remove autostart"
+        } else {
+            "Install autostart"
+        },
+    );
+    AppendMenuW(menu, MF_SEPARATOR, 0, std::ptr::null());
     append(menu, ID_QUIT, "Quit");
 
     let command = TrackPopupMenu(

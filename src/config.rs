@@ -194,4 +194,10 @@ start_hidden = false
     fn rejects_empty_config() {
         assert!(from_str("[defaults]\nrestart = \"never\"\n").is_err());
     }
+
+    #[test]
+    fn example_config_parses() {
+        let cfg = from_str(include_str!("../examples/config.toml")).unwrap();
+        assert_eq!(cfg.apps.len(), 3);
+    }
 }

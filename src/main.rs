@@ -30,11 +30,10 @@ struct Instance {
     restarts: u32,
     started_at: Option<Instant>,
     runner: Option<ConsoleRunner>,
-    single_shot: bool,
 }
 
 impl Instance {
-    fn new(id: u64, cfg: AppConfig, single_shot: bool) -> Self {
+    fn new(id: u64, cfg: AppConfig) -> Self {
         Instance {
             id,
             cfg,
@@ -43,7 +42,6 @@ impl Instance {
             restarts: 0,
             started_at: None,
             runner: None,
-            single_shot,
         }
     }
 
@@ -76,7 +74,7 @@ impl Instance {
         self.runner = None;
         self.visible = false;
         tray::dlog(&format!("{}: exited code=0x{code:08X}", self.cfg.name));
-        if self.single_shot || console::is_user_stop(code) {
+        if console::is_user_stop(code) {
             self.status = Status::Stopped;
             self.restarts = 0;
             return;
@@ -186,22 +184,20 @@ struct Supervisor {
     settings: Settings,
     instances: Vec<Instance>,
     next_id: u64,
-    config_mode: bool,
     autostart: bool,
 }
 
 impl Supervisor {
-    fn new(path: PathBuf, cfg: Config, config_mode: bool) -> Self {
+    fn new(path: PathBuf, cfg: Config) -> Self {
         let mut sup = Supervisor {
             path,
             settings: cfg.settings,
             instances: Vec::new(),
             next_id: 1,
-            config_mode,
             autostart: startup::is_installed(),
         };
         for app in cfg.apps {
-            let instance = Instance::new(sup.next_id, app, !config_mode);
+            let instance = Instance::new(sup.next_id, app);
             sup.next_id += 1;
             sup.instances.push(instance);
         }
@@ -268,7 +264,7 @@ impl Supervisor {
                     }
                 }
                 None => {
-                    let mut instance = Instance::new(self.next_id, app, false);
+                    let mut instance = Instance::new(self.next_id, app);
                     self.next_id += 1;
                     instance.start_or_fail(&self.settings, Instant::now());
                     next.push(instance);
@@ -308,20 +304,6 @@ impl Supervisor {
             instance.stop();
         }
     }
-
-    fn finished_single_shot(&self) -> bool {
-        if self.config_mode {
-            return false;
-        }
-        self.instances
-            .iter()
-            .all(|i| matches!(i.status, Status::Stopped | Status::GivenUp))
-    }
-}
-
-enum Mode {
-    Config(Option<PathBuf>),
-    AdHoc { name: String, command: String },
 }
 
 fn main() {
@@ -338,52 +320,27 @@ fn main() {
         }
         _ => {}
     }
-    let (path, cfg, config_mode) = match parse_mode(&args) {
-        Ok(Mode::Config(explicit)) => {
-            ensure_single_instance();
-            let path = config::resolve_path(explicit);
-            let cfg = match config::load(&path) {
-                Ok(cfg) => cfg,
-                Err(err) => fatal(&format!(
-                    "{}\n\n{err}\n\nCreate the file and start tray-run again.",
-                    path.display()
-                )),
-            };
-            (path, cfg, true)
-        }
-        Ok(Mode::AdHoc { name, command }) => (
-            config::resolve_path(None),
-            Config {
-                apps: vec![AppConfig {
-                    name,
-                    command,
-                    dir: None,
-                    restart: Restart::Never,
-                    start_hidden: true,
-                }],
-                settings: Settings {
-                    restart_gap_ms: 2_000,
-                    restart_backoff_max_ms: 60_000,
-                    restart_max: 0,
-                    restart_reset_ms: 60_000,
-                },
-            },
-            false,
-        ),
+    let explicit = match parse_config(&args) {
+        Ok(path) => path,
         Err(message) => usage_error(&message),
     };
-
-    let mut sup = Supervisor::new(path, cfg, config_mode);
-    let tray = tray::Tray::new();
-    if sup.config_mode {
-        sup.start_all();
-    } else if let Some(instance) = sup.instances.first_mut() {
-        match instance.start() {
-            Ok(()) => {}
-            Err(StartError::Exited(_)) => return,
-            Err(StartError::Failed(err)) => fatal(&err),
+    ensure_single_instance();
+    let path = config::resolve_path(explicit);
+    let cfg = match config::load(&path) {
+        Ok(cfg) => cfg,
+        Err(err) => {
+            let hint = if path.exists() {
+                "Fix the file and start tray-run again."
+            } else {
+                "Create the file and start tray-run again."
+            };
+            fatal(&format!("{}\n\n{err}\n\n{hint}", path.display()))
         }
-    }
+    };
+
+    let mut sup = Supervisor::new(path, cfg);
+    let tray = tray::Tray::new();
+    sup.start_all();
 
     let mut quit = false;
     loop {
@@ -411,8 +368,8 @@ fn main() {
             }
         }
         sup.tick_all();
-        tray.sync(sup.views(), sup.autostart, sup.config_mode);
-        if quit || sup.finished_single_shot() {
+        tray.sync(sup.views(), sup.autostart);
+        if quit {
             break;
         }
         std::thread::sleep(TICK);
@@ -421,50 +378,15 @@ fn main() {
     tray::dlog("tray-run: exiting");
 }
 
-fn parse_mode(args: &[String]) -> Result<Mode, String> {
+fn parse_config(args: &[String]) -> Result<Option<PathBuf>, String> {
     match args.first().map(String::as_str) {
-        None => Ok(Mode::Config(None)),
+        None => Ok(None),
         Some("--config") => match args.get(1) {
-            Some(path) => Ok(Mode::Config(Some(PathBuf::from(path)))),
-            None => Err("--config needs a path".to_string()),
+            Some(path) if args.len() == 2 => Ok(Some(PathBuf::from(path))),
+            Some(_) => Err(format!("unexpected argument: {}\n\n{}", args[2], usage())),
+            None => Err(format!("--config needs a path\n\n{}", usage())),
         },
-        Some(_) => {
-            let mut index = 0;
-            let mut name = None;
-            match args.first().map(String::as_str) {
-                Some("--name") => match args.get(1) {
-                    Some(value) => {
-                        name = Some(value.clone());
-                        index = 2;
-                    }
-                    None => return Err(format!("--name needs a name\n\n{}", usage())),
-                },
-                Some(flag) if flag.starts_with('-') && flag != "--" => {
-                    return Err(format!("unknown option: {flag}\n\n{}", usage()));
-                }
-                _ => {}
-            }
-            let rest = &args[index..];
-            let rest = if rest.first().map(String::as_str) == Some("--") {
-                &rest[1..]
-            } else {
-                rest
-            };
-            if rest.is_empty() {
-                return Err(usage());
-            }
-            let name = name.unwrap_or_else(|| {
-                let program = &rest[0];
-                std::path::Path::new(program)
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| program.clone())
-            });
-            Ok(Mode::AdHoc {
-                name,
-                command: console::join_args(rest),
-            })
-        }
+        Some(flag) => Err(format!("unknown option: {flag}\n\n{}", usage())),
     }
 }
 
@@ -513,7 +435,7 @@ fn uninstall_startup() {
 }
 
 fn usage() -> String {
-    "usage:\n  tray-run [--config PATH]\n  tray-run --install-startup | --uninstall-startup\n  tray-run [--name NAME] [--] <command> [args...]\n  tray-run --help | --version\n\nPrefix a command that starts with - with --.\nRun tray-run --help for the full manual.".to_string()
+    "usage:\n  tray-run [--config PATH]\n  tray-run --install-startup | --uninstall-startup\n  tray-run --help | --version\n\nRun tray-run --help for the full manual.".to_string()
 }
 
 fn fatal(message: &str) -> ! {
@@ -535,10 +457,23 @@ mod tests {
     }
 
     fn parse_err(items: &[&str]) -> String {
-        match parse_mode(&args(items)) {
+        match parse_config(&args(items)) {
             Err(err) => err,
             Ok(_) => panic!("expected an error for {items:?}"),
         }
+    }
+
+    #[test]
+    fn defaults_to_the_lookup_order() {
+        assert_eq!(parse_config(&args(&[])), Ok(None));
+    }
+
+    #[test]
+    fn config_takes_a_path() {
+        assert_eq!(
+            parse_config(&args(&["--config", "C:\\cfg\\tray-run.toml"])),
+            Ok(Some(PathBuf::from("C:\\cfg\\tray-run.toml")))
+        );
     }
 
     #[test]
@@ -549,29 +484,14 @@ mod tests {
     }
 
     #[test]
-    fn double_dash_escapes_a_dashed_command() {
-        match parse_mode(&args(&["--", "--bogus", "arg"])) {
-            Ok(Mode::AdHoc { command, .. }) => assert_eq!(command, "--bogus arg"),
-            Ok(_) => panic!("expected ad-hoc mode"),
-            Err(err) => panic!("unexpected error: {err}"),
-        }
+    fn config_needs_a_value() {
+        let err = parse_err(&["--config"]);
+        assert!(err.contains("--config needs a path"), "{err}");
     }
 
     #[test]
-    fn command_keeps_its_dashed_arguments() {
-        match parse_mode(&args(&["ping", "-t", "127.0.0.1"])) {
-            Ok(Mode::AdHoc { name, command }) => {
-                assert_eq!(name, "ping");
-                assert_eq!(command, "ping -t 127.0.0.1");
-            }
-            Ok(_) => panic!("expected ad-hoc mode"),
-            Err(err) => panic!("unexpected error: {err}"),
-        }
-    }
-
-    #[test]
-    fn name_needs_a_value() {
-        let err = parse_err(&["--name"]);
-        assert!(err.contains("--name needs a name"), "{err}");
+    fn config_takes_one_path() {
+        let err = parse_err(&["--config", "a.toml", "extra"]);
+        assert!(err.contains("unexpected argument: extra"), "{err}");
     }
 }

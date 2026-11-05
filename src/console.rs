@@ -276,14 +276,6 @@ fn quote_args(program: &str, args: &[String]) -> String {
     out
 }
 
-pub fn join_args(parts: &[String]) -> String {
-    parts
-        .iter()
-        .map(|part| quote_arg(part))
-        .collect::<Vec<_>>()
-        .join(" ")
-}
-
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
